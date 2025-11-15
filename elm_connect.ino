@@ -2,6 +2,18 @@
 #include <WiFiClient.h>
 #include <TFT_eSPI.h>
 #include <XPT2046_Touchscreen.h>
+#include <SD.h>
+#include <SPI.h>
+
+#define SD_CS 5
+#define SD_SCK   18
+#define SD_MISO  19
+#define SD_MOSI  23
+
+File logFile;
+const char* logPath = "/obdlog.csv";
+const size_t LOG_MAX = 2 * 1024 * 1024; // 2MB
+
 
 TFT_eSPI tft = TFT_eSPI();
 #define TFT_BG TFT_BLACK
@@ -63,10 +75,66 @@ void scanSupportedPIDs() {
   Serial.println("--- End of PID scan ---\n");
 }
 
+
+void initSD(){
+  // ---- SD INIT ----
+  SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
+
+  if (!SD.begin(SD_CS)) {
+    Serial.println("SD init FAILED!");
+  } else {
+    Serial.println("SD init OK!");
+  }
+  // Rotate log if too large
+  if (SD.exists(logPath)) {
+    File f = SD.open(logPath);
+    if (f && f.size() > LOG_MAX) {
+      f.close();
+      SD.rename(logPath, "/obdlog_old.csv");
+      Serial.println("Rotated obdlog.csv -> obdlog_old.csv");
+    } else if (f) f.close();
+  }
+
+  // Ensure file exists with a header
+  if (!SD.exists(logPath)) {
+    File f = SD.open(logPath, FILE_WRITE);
+    if (f) {
+      f.println("timestamp_ms,rpm,coolant_C");
+      f.close();
+      Serial.println("Created obdlog.csv with header");
+    }
+  }
+}
+
+void logOBD(int rpm, int coolant) {
+  if (!SD.begin(SD_CS)) {
+    Serial.println("SD not available for logging.");
+    return;
+  }
+
+  File f = SD.open(logPath, FILE_APPEND);
+  if (!f) {
+    Serial.println("Could not open obdlog.csv!");
+    return;
+  }
+
+  unsigned long t = millis();
+  f.printf("%lu,%d,%d\n", t, rpm, coolant);
+  f.close();
+
+  Serial.println("Logged to SD.");
+}
+
 void setup() {
   Serial.begin(115200);
+  Serial.println("  --  SETUP  -- ");
+  
   tft.init();
   tft.setRotation(1);
+  
+  initSD();
+
+  
   showMessage("Connecting Wi-Fi...");
 
   WiFi.mode(WIFI_STA);
@@ -94,7 +162,7 @@ void setup() {
   sendCommand("ATSP0");  // auto protocol
 
   // Scan supported PIDs
-  scanSupportedPIDs();
+  //scanSupportedPIDs();
 
   showMessage("Reading OBD...");
   delay(1000);
@@ -131,6 +199,7 @@ void loop() {
   tft.drawCentreString("RPM: " + String(rpm), 160, 100, 4);
   tft.drawCentreString("Temp: " + String(temp) + "C", 160, 140, 4);
 
+  logOBD(rpm, temp);
   delay(2000); // update every 2 seconds
 }
 
