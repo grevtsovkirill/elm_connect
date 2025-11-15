@@ -34,6 +34,35 @@ String sendCommand(String cmd, int wait = 500) {
   return resp;
 }
 
+void scanSupportedPIDs() {
+  Serial.println("\n--- Scanning supported PIDs ---");
+
+  const char* pidGroups[] = {"0100", "0120", "0140", "0160", "0180"};
+  for (int i = 0; i < 5; i++) {
+    String cmd = pidGroups[i];
+    String resp = sendCommand(cmd, 1000);
+
+    int idx = resp.indexOf("41");
+    if (idx < 0) continue;
+
+    // Extract 4 bytes (8 hex chars) after "41 xx"
+    String hexStr = resp.substring(idx + 4);
+    hexStr.trim();
+
+    // Parse bitmask
+    uint32_t mask = strtoul(hexStr.substring(0, 8).c_str(), NULL, 16);
+    Serial.printf("Supported PIDs for %s:\n", cmd);
+    for (int bit = 0; bit < 32; bit++) {
+      if (mask & (1UL << (31 - bit))) {
+        int pidNum = 1 + bit + (i * 0x20);
+        Serial.printf("PID %02X supported\n", pidNum);
+      }
+    }
+    Serial.println();
+  }
+  Serial.println("--- End of PID scan ---\n");
+}
+
 void setup() {
   Serial.begin(115200);
   tft.init();
@@ -64,9 +93,15 @@ void setup() {
   sendCommand("ATH0");
   sendCommand("ATSP0");  // auto protocol
 
+  // Scan supported PIDs
+  scanSupportedPIDs();
+
   showMessage("Reading OBD...");
   delay(1000);
 }
+
+
+
 
 void loop() {
   // Request RPM (PID 010C)
